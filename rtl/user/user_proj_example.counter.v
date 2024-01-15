@@ -96,13 +96,44 @@ module user_proj_example #(
 
     reg ctrl_in_valid_q;
     
-    // WB MI A
+    // distinguish data and code
+    wire decode_outputdata;
+    wire decode_inputdata;
+    wire decode_code;
+    wire valid_outputdata;
+    wire valid_inputdata;
+    wire valid_code;
+    wire [1:0] bank_outputdata;
+    wire [1:0] bank_inputdata;
+    wire [1:0] bank_code;
+    wire [22:0] address_outputdata;
+    wire [22:0] address_inputdata;
+    wire [22:0] address_code;
+
+    assign decode_code = (wbs_adr_i >= 32'h38000000 && wbs_adr_i < 32'h38004000); 
+    assign decode_inputdata = (wbs_adr_i >= 32'h38004000 && wbs_adr_i < 32'h38006000);
+    //assign decode_outputdata = (wbs_adr_i >= 32'h38006000 && wbs_adr_i < 32'h38008000);
+
+    //assign valid_outputdata  = wbs_stb_i && wbs_cyc_i && decode_outputdata;
+    assign valid_inputdata  = wbs_stb_i && wbs_cyc_i && decode_inputdata;
+    assign valid_code  = wbs_stb_i && wbs_cyc_i && decode_code;
+
+    //assign bank_outputdata = 2'b01;
+    assign bank_inputdata = 2'b10; // manully control bank, or we can direct use the interleave 
+    assign bank_code = 2'b11; // for example 3800_0000, 3800_0400 will be same bank (since [9:8] both 2'b00)
+                              // if we want to interleave, we directly use wbs_adr_i will input to different bank
+    //assign address_outputdata = {wbs_adr_i[22:10], bank_outputdata, wbs_adr_i[7:0]};
+    assign address_inputdata = {wbs_adr_i[22:10], bank_inputdata, wbs_adr_i[7:0]};
+    assign address_code = {wbs_adr_i[22:10], bank_code, wbs_adr_i[7:0]};
     
-    assign valid = wbs_stb_i && wbs_cyc_i;
+    // WB MI A
+    //assign valid = wbs_stb_i && wbs_cyc_i;
+    assign valid = (decode_code) ? valid_code : (decode_inputdata) ? valid_inputdata : 1'b0;//(decode_outputdata) ? valid_outputdata : 1'b0;
     assign ctrl_in_valid = wbs_we_i ? valid : ~ctrl_in_valid_q && valid;
     assign wbs_ack_o = (wbs_we_i) ? ~ctrl_busy && valid : ctrl_out_valid; 
     assign bram_mask = wbs_sel_i & {4{wbs_we_i}};
-    assign ctrl_addr = wbs_adr_i[22:0];
+    //assign ctrl_addr = wbs_adr_i[22:0];
+    assign ctrl_addr = (decode_code) ? address_code : (decode_inputdata) ? address_inputdata : wbs_adr_i[22:0];//(decode_outputdata) ? address_outputdata : wbs_adr_i[22:0];
 
     // IO
     assign io_out = d2c_data;

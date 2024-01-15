@@ -132,8 +132,76 @@ module sdram_controller (
 
     assign data_out = data_q;
     assign busy = !ready_q;
-    assign out_valid = out_valid_q;
-    
+    // assign out_valid = out_valid_q;
+
+    // signal for prefetch buffer
+    reg in_valid1, in_valid2, in_valid3;
+    reg prefetch;
+    reg addr_flag;
+    reg out_not;
+    reg in_req;
+    reg read_req;
+
+    assign out_valid = out_valid_q & !out_not & in_req;
+
+
+    always@(posedge clk) begin
+        if (rst) begin
+            out_not <= 1'b0;
+        end else if (out_valid_q) begin
+            out_not <= 1'b0;
+        end else if (in_valid & addr_flag &(addr != saved_addr_q)) begin
+            out_not <= 1'b1;
+        end else begin
+            out_not <= out_not;
+        end 
+    end
+
+    always@(posedge clk) begin
+        if (rst) begin
+            in_req <= 1'b0;
+        end else if (out_valid) begin
+            in_req <= 1'b0;
+        end else if (read_req) begin
+            in_req <= 1'b1;
+        end else begin
+            in_req <= in_req;
+        end 
+    end
+
+    always@(posedge clk) begin
+        if (rst) begin
+            prefetch <= 1'b0;
+        end else if (~in_req | out_not) begin
+            prefetch <= 1'b0;
+        end else if (in_valid2) begin
+            prefetch <= 1'b1;
+        end else begin
+            prefetch <= prefetch;
+        end
+    end
+
+    always@(posedge clk) begin
+        if (rst) begin
+            addr_flag <= 1'b0;
+        end else if (in_req & (state_q == IDLE) & (!ready_q)) begin
+            addr_flag <= 1'b1;
+        end else if (out_valid_q) begin
+            addr_flag <= 1'b0;
+        end else begin
+            addr_flag <= addr_flag;
+        end
+    end
+
+    always@* begin
+        if (in_valid & ~rw) begin
+            read_req = 1'b1;
+        end else begin
+            read_req = 1'b0;
+        end
+    end
+
+
     always @* begin
         // Default values
         dq_d = dq_q;
@@ -178,12 +246,22 @@ module sdram_controller (
         saved_data_d = saved_data_q;
         saved_addr_d = saved_addr_q;
         ready_d = ready_q;
+        /*
         if (ready_q && in_valid) begin
             saved_rw_d = rw;
             saved_data_d = data_in;
             saved_addr_d = addr;
             ready_d = 1'b0;
         end 
+        */
+
+        // set for prefetch buffer
+        if (ready_q && (in_valid | in_valid3)) begin
+            saved_rw_d = rw;
+            saved_data_d = data_in;
+            saved_addr_d = addr + {prefetch, 2'b0};
+            ready_d = 1'b0;
+        end
 
         case (state_q)
             ///// INITALIZATION /////
@@ -220,7 +298,7 @@ module sdram_controller (
                 delay_ctr_d = delay_ctr_q - 1'b1;
                 if (delay_ctr_q == 13'd0) begin
                     state_d = next_state_q;
-                    // if (next_state_q == WRITE) begin
+                    // if (next_sWAITtate_q == WRITE) begin
                     //     dq_en_d = 1'b1; // enable the bus early
                     //     dq_d = data_q[7:0];
                     // end
@@ -234,6 +312,7 @@ module sdram_controller (
                     next_state_d = REFRESH;
                     precharge_bank_d = 3'b100; // all banks
                     refresh_flag_d = 1'b0; // clear the refresh flag
+
                 end else if (!ready_q) begin // operation waiting
                     ready_d = 1'b1; // clear the queue
                     rw_op_d = saved_rw_q; // save the values we'll need later
@@ -359,11 +438,19 @@ module sdram_controller (
             dq_en_q <= 1'b0;
             state_q <= INIT;
             ready_q <= 1'b0;
+            // prefetch buffer rst
+            in_valid1 <= 1'b0;
+            in_valid2 <= 1'b0;
+            in_valid3 <= 1'b0;
         end else begin
             cle_q <= cle_d;
             dq_en_q <= dq_en_d;
             state_q <= state_d;
             ready_q <= ready_d;
+            // prefetch buffer change state
+            in_valid1 <= read_req;
+            in_valid2 <= in_valid1;
+            in_valid3 <= in_valid2;
         end
 
         saved_rw_q <= saved_rw_d;
